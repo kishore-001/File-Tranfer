@@ -125,34 +125,68 @@ func discoverPeers() {
 		return
 	}
 
-	entries := make(chan *zeroconf.ServiceEntry)
+	entries := make(chan *zeroconf.ServiceEntry, 10) // Buffered channel
+	var wg sync.WaitGroup
+	wg.Add(1)
 
-	// Process discovered entries
+	// Process discovered entries with immediate updates
 	go func(results <-chan *zeroconf.ServiceEntry) {
+		defer wg.Done()
 		tempPeers := []Peer{}
+		entryCount := 0
 
 		for entry := range results {
+			entryCount++
+			log.Printf("Received mDNS entry #%d: %s", entryCount, entry.Instance)
+			log.Printf("  Service: %s, Domain: %s", entry.Service, entry.Domain)
+			log.Printf("  Host: %s, Port: %d", entry.HostName, entry.Port)
+			log.Printf("  IPv4: %v, IPv6: %v", entry.AddrIPv4, entry.AddrIPv6)
+			log.Printf("  TXT: %v", entry.Text)
+
 			peer := processPeerEntry(entry)
-			if peer != nil && !isOwnPeer(peer.ID) {
-				tempPeers = append(tempPeers, *peer)
+			if peer != nil {
+				log.Printf("Processed peer: ID=%s, Hostname=%s, IP=%s",
+					peer.ID, peer.Hostname, peer.IP)
+
+				if !isOwnPeer(peer.ID) {
+					tempPeers = append(tempPeers, *peer)
+					log.Printf("Added peer: %s (%s)", peer.Hostname, peer.IP)
+
+					// Update peers list immediately for responsive UI
+					updatePeersList(tempPeers)
+				} else {
+					log.Printf("Skipping own peer: %s", peer.ID)
+				}
+			} else {
+				log.Printf("Failed to process peer entry")
 			}
 		}
 
-		// Update discovered peers list
-		updatePeersList(tempPeers)
+		log.Printf("Entry processing goroutine finished. Total entries: %d", entryCount)
 	}(entries)
 
 	// Browse for services with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Longer timeout
 	defer cancel()
 
+	log.Printf("Starting mDNS browse for: %s.%s", serviceType, domain)
 	err = resolver.Browse(ctx, serviceType, domain, entries)
 	if err != nil {
 		log.Printf("Failed to browse for peers: %v", err)
+		close(entries) // Close channel on error
+		wg.Wait()
 		return
 	}
 
-	<-ctx.Done() // Wait for timeout
+	// Wait for context timeout or cancellation
+	<-ctx.Done()
+
+	// Close the entries channel to stop the goroutine
+	close(entries)
+
+	// Wait for the goroutine to finish processing
+	wg.Wait()
+
 	log.Printf("Discovery completed. Found %d peers", len(discoveredPeers))
 }
 
