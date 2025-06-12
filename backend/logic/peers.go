@@ -125,11 +125,11 @@ func discoverPeers() {
 		return
 	}
 
-	entries := make(chan *zeroconf.ServiceEntry, 10) // Buffered channel
+	entries := make(chan *zeroconf.ServiceEntry, 10)
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	// Process discovered entries with immediate updates
+	// Process discovered entries
 	go func(results <-chan *zeroconf.ServiceEntry) {
 		defer wg.Done()
 		tempPeers := []Peer{}
@@ -151,9 +151,6 @@ func discoverPeers() {
 				if !isOwnPeer(peer.ID) {
 					tempPeers = append(tempPeers, *peer)
 					log.Printf("Added peer: %s (%s)", peer.Hostname, peer.IP)
-
-					// Update peers list immediately for responsive UI
-					updatePeersList(tempPeers)
 				} else {
 					log.Printf("Skipping own peer: %s", peer.ID)
 				}
@@ -162,29 +159,29 @@ func discoverPeers() {
 			}
 		}
 
-		log.Printf("Entry processing goroutine finished. Total entries: %d", entryCount)
+		// Update peers list after processing all entries
+		updatePeersList(tempPeers)
+		log.Printf("Entry processing finished. Total entries: %d, Valid peers: %d", entryCount, len(tempPeers))
 	}(entries)
 
 	// Browse for services with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Longer timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	log.Printf("Starting mDNS browse for: %s.%s", serviceType, domain)
 	err = resolver.Browse(ctx, serviceType, domain, entries)
 	if err != nil {
 		log.Printf("Failed to browse for peers: %v", err)
-		close(entries) // Close channel on error
+		// Don't close entries here - zeroconf handles it
 		wg.Wait()
 		return
 	}
 
-	// Wait for context timeout or cancellation
+	// Wait for context timeout - zeroconf will close the channel automatically
 	<-ctx.Done()
 
-	// Close the entries channel to stop the goroutine
-	close(entries)
-
-	// Wait for the goroutine to finish processing
+	// Wait for the processing goroutine to finish
+	// The channel is already closed by zeroconf, so the range loop will exit
 	wg.Wait()
 
 	log.Printf("Discovery completed. Found %d peers", len(discoveredPeers))
