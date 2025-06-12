@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package filetransfer;
+
+option go_package = "./proto";
+
+message FileChunk {
+  string file_name = 1;
+  bytes data = 2;
+  int64 chunk_number = 3;
+  int64 total_chunks = 4;
+}
+
+message FileTransferResponse {
+  bool success = 1;
+  string message = 2;
+  int64 bytes_received = 3;
+}
+
+service FileTransferService {
+  rpc SendFile(stream FileChunk) returns (FileTransferResponse);
+}
