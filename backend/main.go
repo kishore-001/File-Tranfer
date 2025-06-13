@@ -29,7 +29,7 @@ func main() {
 
 	// Start REST server
 	log.Println("Backend running on port 9001")
-	log.Fatal(http.ListenAndServe(":9001", handler))
+	log.Fatal(http.ListenAndServe("80", handler))
 }
 
 // CORS middleware for frontend communication
